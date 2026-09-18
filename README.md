@@ -4,12 +4,12 @@ Two small AutoHotkey scripts that make typing in several languages on Windows fe
 same as on a Mac, so your fingers don't have to re-learn anything when you move between
 the two.
 
-| Script | What it does | AutoHotkey |
-|---|---|---|
-| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes. The Windows counterpart of macOS' *Show input source indicator near the caret*. | v2.0 |
-| `layout-switch.ahk` | Cycles through *your* list of languages with one hotkey (Ctrl+Space by default, like macOS) and jumps to a language directly with another. Ignores layouts you don't use. | v1.1 |
+| Script | What it does |
+|---|---|
+| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes. The Windows counterpart of macOS' *Show input source indicator near the caret*. |
+| `layout-switch.ahk` | Cycles through *your* list of languages with one hotkey (Ctrl+Space by default, like macOS) and jumps to a language directly with another. Ignores layouts you don't use. |
 
-They are independent: run one or both.
+Both are AutoHotkey v2 and independent: run one or both.
 
 ![EN badge under the caret](docs/badge-en.png) ![DE/RU badge, second colour](docs/badge-ru.png)
 
@@ -24,9 +24,7 @@ that gap.
 ## Requirements
 
 - Windows 10 or 11.
-- [AutoHotkey](https://www.autohotkey.com/) v2.0 for `layout-tooltip.ahk`, v1.1 for
-  `layout-switch.ahk`. The standard installer ships both, and its launcher picks the right
-  interpreter per file.
+- [AutoHotkey](https://www.autohotkey.com/) v2.0.
 - `layout-tooltip.ahk` needs `lib/UIA.ahk` next to it (bundled, see Credits).
 
 ## Install
@@ -37,10 +35,13 @@ that gap.
 3. Double-click the script. To start it at logon, put a shortcut into
    `shell:startup` or create a scheduled task.
 
-To use the badge inside your own v2 script instead of running it standalone:
+To use them inside your own v2 script instead of running them standalone:
 
 ```autohotkey
-#Include path\to\layout-tooltip.ahk
+#Include path\to\layout-tooltip.ahk      ; badge starts on its own
+#Include path\to\layout-switch.ahk       ; only defines the Layout class
+^Space::Layout.Cycle(["EN", "DE"])
+^+2::Layout.Set("DE")
 ```
 
 ## Configure
@@ -76,9 +77,9 @@ because it would already be late).
 ### `layout-switch.ahk`
 
 ```autohotkey
-Languages     := ["EN", "DE"]                ; cycle order, ISO 639 codes
-CycleHotkey   := "^Space"                    ; Ctrl+Space, macOS style
-DirectHotkeys := {"^+1": "EN", "^+2": "DE"}  ; Ctrl+Shift+1 / +2, or {} to disable
+global Languages     := ["EN", "DE"]                   ; cycle order, ISO 639 codes
+global CycleHotkey   := "^Space"                       ; Ctrl+Space, macOS style
+global DirectHotkeys := Map("^+1", "EN", "^+2", "DE")  ; Ctrl+Shift+1 / +2, or Map() to disable
 ```
 
 Hotkey syntax is AutoHotkey's: `^` Ctrl, `!` Alt, `+` Shift, `#` Win. `CapsLock` is a
@@ -109,8 +110,6 @@ back to a normal window and simply can't overlay those shell surfaces.
 
 ## Known limitations
 
-- `layout-switch.ahk` is AutoHotkey v1.1 code (the `Lyt` class it builds on is v1). A v2
-  port is welcome.
 - The very first badge in a freshly started app may be skipped: the app's accessibility
   tree is built on the first query, which can take longer than the 100 ms budget. Every
   later switch is instant.
@@ -121,9 +120,6 @@ back to a normal window and simply can't overlay those shell surfaces.
 
 ## Credits
 
-- The `Lyt` class in `layout-switch.ahk` comes from
-  [this AutoHotkey forum thread](https://www.autohotkey.com/boards/viewtopic.php?f=6&t=28258)
-  and is included unchanged.
 - `lib/UIA.ahk` is [UIA-v2](https://github.com/Descolada/UIA-v2) by Descolada, MIT
   licence.
 
