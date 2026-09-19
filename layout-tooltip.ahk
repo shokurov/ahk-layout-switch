@@ -42,6 +42,7 @@ global LT_FOLLOW_TICK    := 30    ; ms between caret re-position while visible
 global LT_POLL_TICK      := 50    ; ms between layout polls
 global LT_CARET_GAP      := 4     ; px gap between caret bottom and badge
 global LT_MAX_LOOKUP     := 100   ; ms; if finding the caret took longer, it's too late — show nothing
+global LT_MODIFIER_WAIT  := 2000  ; ms; how long to wait for Alt/Win to be released before showing
 
 ; ============================================================================ End of configuration
 
@@ -338,10 +339,25 @@ LT_Trigger(hkl := 0) {
 ; fallback), paints the badge under it and shows the window without activating it.
 ; Repeated calls while visible simply re-render and restart the hide timer.
 ;
+; Nothing happens while Alt or Win is still physically held (the usual state right after
+; Alt+Space / Win+Space): Chromium and Electron apps treat a window appearing — or an
+; accessibility query arriving — during an Alt press as if Alt had been pressed alone,
+; and open the menu bar when it is released. The show is re-tried every 20 ms until the
+; modifiers are up, for at most LT_MODIFIER_WAIT ms.
+;
 ; Params:  hkl  layout to display; 0 = current layout of the active window
 ; Sets:    LT_visible, LT_lastHkl.
 LT_Show(hkl := 0) {
     global LT_visible, LT_lastHkl
+    static waited := 0
+    if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")) {
+        if (waited < LT_MODIFIER_WAIT) {
+            waited += 20
+            SetTimer(LT_Show.Bind(hkl), -20)
+            return
+        }
+    }
+    waited := 0
     if !hkl
         hkl := LT_ActiveHkl(&_)
     LT_lastHkl := hkl

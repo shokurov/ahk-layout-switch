@@ -72,7 +72,10 @@ global LT_LANG := Map(
 
 Timing: `LT_SHOW_DELAY` (50 ms after the switch), `LT_HIDE_DELAY` (300 ms on screen),
 `LT_MAX_LOOKUP` (if finding the caret takes longer than 100 ms the badge is skipped,
-because it would already be late).
+because it would already be late). The badge also waits until Alt and Win are physically
+released (`LT_MODIFIER_WAIT` caps the wait at 2 s): Chromium and Electron apps treat a
+window that appears while Alt is held as a lone Alt press and would open their menu bar
+when you let go.
 
 ### `layout-switch.ahk`
 
