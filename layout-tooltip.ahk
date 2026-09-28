@@ -43,6 +43,7 @@ global LT_POLL_TICK      := 50    ; ms between layout polls
 global LT_CARET_GAP      := 4     ; px gap between caret bottom and badge
 global LT_MAX_LOOKUP     := 100   ; ms; if finding the caret took longer, it's too late — show nothing
 global LT_MODIFIER_WAIT  := 2000  ; ms; how long to wait for Alt/Win to be released before showing
+global LT_SHOW_ON_SWITCH  := true   ; show the badge when switching to a window with an input field
 
 ; ============================================================================ End of configuration
 
@@ -315,10 +316,13 @@ LT_Poll() {
     hkl := LT_ActiveHkl(&hwnd)
     if !hkl
         return
-    changed := (hwnd = LT_lastHwnd) && (hkl != LT_lastHkl) && LT_lastHkl
+    switched := (hwnd != LT_lastHwnd) && LT_lastHwnd       ; foreground window changed (skip first poll)
+    changed  := (hwnd = LT_lastHwnd) && (hkl != LT_lastHkl) && LT_lastHkl
     LT_lastHwnd := hwnd, LT_lastHkl := hkl
     if changed
         LT_Trigger(hkl)
+    else if switched && LT_SHOW_ON_SWITCH
+        LT_Trigger(0, true)    ; layout + caret resolved at show time
 }
 
 ; LT_Trigger — schedule the badge to appear after LT_SHOW_DELAY ms.
@@ -327,8 +331,8 @@ LT_Poll() {
 ; skip the poll latency. The poll calls it too.
 ;
 ; Params:  hkl  layout to display; 0 = read the active window's layout at show time
-LT_Trigger(hkl := 0) {
-    SetTimer(LT_Show.Bind(hkl), -LT_SHOW_DELAY)
+LT_Trigger(hkl := 0, requireCaret := false) {
+    SetTimer(LT_Show.Bind(hkl, requireCaret), -LT_SHOW_DELAY)
 }
 
 ; ---------------------------------------------------------------- show / hide
@@ -345,15 +349,17 @@ LT_Trigger(hkl := 0) {
 ; and open the menu bar when it is released. The show is re-tried every 20 ms until the
 ; modifiers are up, for at most LT_MODIFIER_WAIT ms.
 ;
-; Params:  hkl  layout to display; 0 = current layout of the active window
+; Params:  hkl           layout to display; 0 = current layout of the active window
+;          requireCaret  if true, show nothing when no caret is found (used by the
+;                        window-switch trigger so a caret-less window stays blank)
 ; Sets:    LT_visible, LT_lastHkl.
-LT_Show(hkl := 0) {
+LT_Show(hkl := 0, requireCaret := false) {
     global LT_visible, LT_lastHkl
     static waited := 0
     if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")) {
         if (waited < LT_MODIFIER_WAIT) {
             waited += 20
-            SetTimer(LT_Show.Bind(hkl), -20)
+            SetTimer(LT_Show.Bind(hkl, requireCaret), -20)
             return
         }
     }
@@ -369,13 +375,17 @@ LT_Show(hkl := 0) {
            : LT_FALLBACK["accent"]
     ; A slow first lookup (accessibility tree being built in the target process) means it's
     ; too late to be useful — show nothing. No caret at all (Warp, games, GPU-rendered UIs…)
-    ; falls back to the mouse pointer.
+    ; falls back to the mouse pointer — unless the show was requested for a window switch,
+    ; where a missing caret means "no input field" and the badge is skipped entirely.
     t := A_TickCount
     found := LT_GetCaret(&x, &y, &w, &h)
     if (A_TickCount - t > LT_MAX_LOOKUP)
         return
-    if !found
+    if !found {
+        if requireCaret
+            return
         LT_MouseAnchor(&x, &y, &w, &h)
+    }
     LT_Render(info[1], color, x, y + h + LT_CARET_GAP)
     LT_Reposition(x, y, w, h)
     DllCall("ShowWindow", "Ptr", LT_hwnd, "Int", 8)  ; SW_SHOWNA
