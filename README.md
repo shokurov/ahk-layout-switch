@@ -6,7 +6,7 @@ the two.
 
 | Script | What it does |
 |---|---|
-| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes. The Windows counterpart of macOS' *Show input source indicator near the caret*. |
+| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes — and whenever you switch to a window whose focus lands on a text input field. The Windows counterpart of macOS' *Show input source indicator near the caret*. |
 | `layout-switch.ahk` | Cycles through *your* list of languages with one hotkey (Ctrl+Space by default, like macOS) and jumps to a language directly with another. Ignores layouts you don't use. |
 
 Both are AutoHotkey v2 and independent: run one or both.
@@ -76,6 +76,10 @@ because it would already be late). The badge also waits until Alt and Win are ph
 released (`LT_MODIFIER_WAIT` caps the wait at 2 s): Chromium and Electron apps treat a
 window that appears while Alt is held as a lone Alt press and would open their menu bar
 when you let go.
+
+Switching to a window whose focus lands on a text input field also shows the badge for
+the current layout, even if it did not change. Turn that off with `LT_SHOW_ON_SWITCH :=
+false`. Windows without an input field never show the badge from this trigger.
 
 ### `layout-switch.ahk`
 
