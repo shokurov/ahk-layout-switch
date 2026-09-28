@@ -2,8 +2,9 @@
 ; layout-tooltip.ahk — show a small badge with the keyboard-layout code ("EN"/"DE"…)
 ; right under the text caret whenever the layout of the active window changes
 ; (Ctrl+Space, Win+Space, Alt+Shift, mouse click on the tray indicator — any source),
-; and when switching to another window whose focus lands on a text input field
-; (LT_SHOW_ON_SWITCH).
+; when switching to another window whose focus lands on a text input field
+; (LT_SHOW_ON_SWITCH), and when entering any text input field afterwards
+; (LT_SHOW_ON_FIELD_ENTRY).
 ;
 ; Caret position is resolved through regular, documented APIs only:
 ;   1. GetGUIThreadInfo (classic Win32 caret: Notepad, Explorer, Office, Sublime, WinForms…)
