@@ -2,8 +2,9 @@
 ; layout-tooltip.ahk — show a small badge with the keyboard-layout code ("EN"/"DE"…)
 ; right under the text caret whenever the layout of the active window changes
 ; (Ctrl+Space, Win+Space, Alt+Shift, mouse click on the tray indicator — any source),
-; and when switching to another window whose focus lands on a text input field
-; (LT_SHOW_ON_SWITCH).
+; when switching to another window whose focus lands on a text input field
+; (LT_SHOW_ON_SWITCH), and when entering any text input field afterwards
+; (LT_SHOW_ON_FIELD_ENTRY).
 ;
 ; Caret position is resolved through regular, documented APIs only:
 ;   1. GetGUIThreadInfo (classic Win32 caret: Notepad, Explorer, Office, Sublime, WinForms…)
@@ -45,6 +46,8 @@ global LT_CARET_GAP      := 4     ; px gap between caret bottom and badge
 global LT_MAX_LOOKUP     := 100   ; ms; if finding the caret took longer, it's too late — show nothing
 global LT_MODIFIER_WAIT  := 2000  ; ms; how long to wait for Alt/Win to be released before showing
 global LT_SHOW_ON_SWITCH  := true   ; show the badge when switching to a window with an input field
+global LT_SHOW_ON_FIELD_ENTRY := true   ; show the badge when entering a text input field
+global LT_FIELD_PROBE_TICK    := 250    ; ms between caret probes
 
 ; ============================================================================ End of configuration
 
@@ -114,6 +117,8 @@ global LT_lastHkl := 0
 global LT_visible := false
 global LT_pendingHkl := 0, LT_pendingCaret := false  ; latest LT_Trigger state, shown by the shared timer
 global LT_strictCaret := false                       ; current badge may not fall back to the mouse
+global LT_probeHwnd := 0     ; active hwnd at the last caret probe
+global LT_lastCaret := true  ; latch: caret present at last probe (true = first snapshot of a window never counts as an entry)
 
 ; AutoHotkey is system-DPI-aware: on a monitor with a different scale factor every
 ; coordinate it sees is virtualised, and the badge drifts away from the caret in
@@ -153,6 +158,8 @@ LT_Init() {
     ; DWMWCP_ROUNDSMALL = 3). Harmless no-op on older builds.
     try DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", LT_hwnd, "UInt", 33, "UInt*", 3, "UInt", 4)
     SetTimer(LT_Poll, LT_POLL_TICK)
+    if LT_SHOW_ON_FIELD_ENTRY
+        SetTimer(LT_Probe, LT_FIELD_PROBE_TICK)
 }
 
 ; LT_Render — paint the badge bitmap and push it to the layered window.
@@ -328,6 +335,49 @@ LT_Poll() {
         LT_Trigger(hkl)
     else if switched && LT_SHOW_ON_SWITCH
         LT_Trigger(0, true)    ; layout + caret resolved at show time
+}
+
+; LT_Probe — timer callback (every LT_FIELD_PROBE_TICK ms) that detects entering a text
+; input field.
+;
+; Keeps a latch of whether the active window had a text caret at the previous probe. When
+; the caret appears while the latch says "no caret", the user just entered a field — show
+; the badge (LT_Trigger(0, true): layout and caret resolved at show time, no mouse
+; fallback). The first snapshot of a window is seeded "caret present" so a window the
+; script starts in, or switches to with focus already in a field, does not count as an
+; entry — only a real 0→1 transition does.
+;
+; A slow probe (accessibility tree being built in a fresh process) is skipped without
+; touching the latch: it is neither a transition nor proof the caret is gone, and the
+; next probe will be fast.
+;
+; While Alt or Win is physically held the probe is skipped without touching the latch —
+; the accessibility query itself can make Chromium/Electron open their menu bar (see
+; LT_Show's modifier wait).
+;
+; Sets:    LT_probeHwnd, LT_lastCaret.
+LT_Probe() {
+    global LT_probeHwnd, LT_lastCaret
+    hwnd := WinExist("A")
+    if !hwnd
+        return
+    ; Don't run an accessibility query while Alt or Win is physically held: Chromium and
+    ; Electron apps treat such a query during an Alt press as Alt pressed alone and open
+    ; their menu bar (the same reason LT_Show waits for the modifiers). A skipped probe
+    ; leaves the latch untouched — it is neither a transition nor proof the caret is gone.
+    if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P"))
+        return
+    if (hwnd != LT_probeHwnd) {          ; new window — snapshot does not count as entry
+        LT_probeHwnd := hwnd
+        LT_lastCaret := true
+    }
+    t := A_TickCount
+    found := LT_GetCaret(&x, &y, &w, &h)
+    if (A_TickCount - t > LT_MAX_LOOKUP)
+        return                           ; slow probe — skip, keep latch state
+    if (found && !LT_lastCaret && LT_SHOW_ON_FIELD_ENTRY)
+        LT_Trigger(0, true)              ; transition into a field — show the badge
+    LT_lastCaret := found
 }
 
 ; LT_Trigger — schedule the badge to appear after LT_SHOW_DELAY ms.

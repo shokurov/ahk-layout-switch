@@ -6,7 +6,7 @@ the two.
 
 | Script | What it does |
 |---|---|
-| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes — and whenever you switch to a window whose focus lands on a text input field. The Windows counterpart of macOS' *Show input source indicator near the caret*. |
+| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes — and whenever you enter a text input field, whether by switching to a window whose focus lands on one or by clicking/tabbing into one afterwards. The Windows counterpart of macOS' *Show input source indicator near the caret*. |
 | `layout-switch.ahk` | Cycles through *your* list of languages with one hotkey (Ctrl+Space by default, like macOS) and jumps to a language directly with another. Ignores layouts you don't use. |
 
 Both are AutoHotkey v2 and independent: run one or both.
@@ -80,6 +80,14 @@ when you let go.
 Switching to a window whose focus lands on a text input field also shows the badge for
 the current layout, even if it did not change. Turn that off with `LT_SHOW_ON_SWITCH :=
 false`. Windows without an input field never show the badge from this trigger.
+
+Entering any text input field afterwards also shows the badge for the current layout,
+even if it did not change: every time the focus moves from "no text field" to "a text
+field" the badge appears, so you always see the active layout before you start typing.
+Turn that off with `LT_SHOW_ON_FIELD_ENTRY := false`. The caret is probed every
+`LT_FIELD_PROBE_TICK` (250 ms); a slow probe (freshly started app still building its
+accessibility tree) is skipped. The first snapshot of a window never counts as an entry,
+so switching directly into a field shows the badge once, not twice.
 
 ### `layout-switch.ahk`
 
