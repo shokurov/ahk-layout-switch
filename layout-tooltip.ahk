@@ -1,8 +1,9 @@
 #Requires AutoHotkey v2.0
 ; layout-tooltip.ahk — show a small badge with the keyboard-layout code ("EN"/"DE"…)
 ; right under the text caret whenever the layout of the active window changes
-; (Ctrl+Space, Win+Space, Alt+Shift, mouse click on the tray indicator — any source).
-; The Windows counterpart of macOS' "Show input source indicator near the caret".
+; (Ctrl+Space, Win+Space, Alt+Shift, mouse click on the tray indicator — any source),
+; and when switching to another window whose focus lands on a text input field
+; (LT_SHOW_ON_SWITCH).
 ;
 ; Caret position is resolved through regular, documented APIs only:
 ;   1. GetGUIThreadInfo (classic Win32 caret: Notepad, Explorer, Office, Sublime, WinForms…)
