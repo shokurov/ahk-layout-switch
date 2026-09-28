@@ -158,7 +158,8 @@ LT_Init() {
     ; DWMWCP_ROUNDSMALL = 3). Harmless no-op on older builds.
     try DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", LT_hwnd, "UInt", 33, "UInt*", 3, "UInt", 4)
     SetTimer(LT_Poll, LT_POLL_TICK)
-    SetTimer(LT_Probe, LT_FIELD_PROBE_TICK)
+    if LT_SHOW_ON_FIELD_ENTRY
+        SetTimer(LT_Probe, LT_FIELD_PROBE_TICK)
 }
 
 ; LT_Render — paint the badge bitmap and push it to the layered window.
@@ -350,11 +351,21 @@ LT_Poll() {
 ; touching the latch: it is neither a transition nor proof the caret is gone, and the
 ; next probe will be fast.
 ;
+; While Alt or Win is physically held the probe is skipped without touching the latch —
+; the accessibility query itself can make Chromium/Electron open their menu bar (see
+; LT_Show's modifier wait).
+;
 ; Sets:    LT_probeHwnd, LT_lastCaret.
 LT_Probe() {
     global LT_probeHwnd, LT_lastCaret
     hwnd := WinExist("A")
     if !hwnd
+        return
+    ; Don't run an accessibility query while Alt or Win is physically held: Chromium and
+    ; Electron apps treat such a query during an Alt press as Alt pressed alone and open
+    ; their menu bar (the same reason LT_Show waits for the modifiers). A skipped probe
+    ; leaves the latch untouched — it is neither a transition nor proof the caret is gone.
+    if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P"))
         return
     if (hwnd != LT_probeHwnd) {          ; new window — snapshot does not count as entry
         LT_probeHwnd := hwnd
