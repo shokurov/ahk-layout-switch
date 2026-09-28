@@ -112,6 +112,8 @@ global LT_w := 0, LT_h := 0
 global LT_lastHwnd := 0
 global LT_lastHkl := 0
 global LT_visible := false
+global LT_pendingHkl := 0, LT_pendingCaret := false  ; latest LT_Trigger state, shown by the shared timer
+global LT_strictCaret := false                       ; current badge may not fall back to the mouse
 
 ; AutoHotkey is system-DPI-aware: on a monitor with a different scale factor every
 ; coordinate it sees is virtualised, and the badge drifts away from the caret in
@@ -305,11 +307,13 @@ LT_ConsoleHostThread(clientPid) {
     return found
 }
 
-; LT_Poll — timer callback (every LT_POLL_TICK ms) that detects layout changes.
+; LT_Poll — timer callback (every LT_POLL_TICK ms) that detects layout changes and
+; foreground-window switches.
 ;
-; Compares the active window's layout with the previous poll. Only a change *within the
-; same window* counts: switching to another window that happens to use a different layout
-; is not a layout switch and shows nothing. On change, schedules the badge via LT_Trigger.
+; Compares the active window's layout with the previous poll. A layout change *within the
+; same window* shows the badge; switching to another window whose focus lands on a text
+; input field shows it too (LT_SHOW_ON_SWITCH). A switch to a window without an input
+; field shows nothing. On either trigger, schedules the badge via LT_Trigger.
 ;
 ; Sets:    LT_lastHwnd, LT_lastHkl.
 LT_Poll() {
@@ -329,11 +333,25 @@ LT_Poll() {
 ; LT_Trigger — schedule the badge to appear after LT_SHOW_DELAY ms.
 ;
 ; Public entry: call it right after a manual switch (e.g. from the Alt+Space hotkey) to
-; skip the poll latency. The poll calls it too.
+; skip the poll latency. The poll calls it too. Repeated calls re-arm a single shared
+; timer (LT_ShowPending) with the newest state, so rapid triggers — Alt+Tab through
+; several windows — resolve to the last one instead of stacking concurrent shows.
 ;
-; Params:  hkl  layout to display; 0 = read the active window's layout at show time
+; Params:  hkl           layout to display; 0 = read the active window's layout at show time
+;          requireCaret  if true, show nothing when no caret is found (used by the
+;                        window-switch trigger so a caret-less window stays blank)
 LT_Trigger(hkl := 0, requireCaret := false) {
-    SetTimer(LT_Show.Bind(hkl, requireCaret), -LT_SHOW_DELAY)
+    global LT_pendingHkl, LT_pendingCaret
+    LT_pendingHkl := hkl, LT_pendingCaret := requireCaret
+    SetTimer(LT_ShowPending, -LT_SHOW_DELAY)
+}
+
+; LT_ShowPending — shared show-timer callback. Reads the latest trigger state so the
+; newest trigger wins; because LT_ShowPending is one named function, re-arming the timer
+; replaces any previously scheduled show instead of stacking a second one.
+LT_ShowPending() {
+    global LT_pendingHkl, LT_pendingCaret
+    LT_Show(LT_pendingHkl, LT_pendingCaret)
 }
 
 ; ---------------------------------------------------------------- show / hide
@@ -353,20 +371,22 @@ LT_Trigger(hkl := 0, requireCaret := false) {
 ; Params:  hkl           layout to display; 0 = current layout of the active window
 ;          requireCaret  if true, show nothing when no caret is found (used by the
 ;                        window-switch trigger so a caret-less window stays blank)
-; Sets:    LT_visible, LT_lastHkl.
+; Sets:    LT_visible, LT_lastHkl, LT_strictCaret.
 LT_Show(hkl := 0, requireCaret := false) {
-    global LT_visible, LT_lastHkl
+    global LT_visible, LT_lastHkl, LT_strictCaret
     static waited := 0
     if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")) {
         if (waited < LT_MODIFIER_WAIT) {
             waited += 20
-            SetTimer(LT_Show.Bind(hkl, requireCaret), -20)
+            SetTimer(LT_ShowPending, -20)
             return
         }
     }
     waited := 0
     if !hkl
         hkl := LT_ActiveHkl(&_)
+    if requireCaret && !hkl
+        return      ; switch-trigger: no readable layout — nothing to show
     LT_lastHkl := hkl
     langId := hkl & 0xFFFF
     info := LT_LANG.Has(langId) ? LT_LANG[langId] : [LT_IsoCode(langId), LT_OTHER_SHADE]
@@ -391,6 +411,7 @@ LT_Show(hkl := 0, requireCaret := false) {
     LT_Reposition(x, y, w, h)
     DllCall("ShowWindow", "Ptr", LT_hwnd, "Int", 8)  ; SW_SHOWNA
     LT_visible := true
+    LT_strictCaret := requireCaret
     SetTimer(LT_Follow, LT_FOLLOW_TICK)
     SetTimer(LT_Hide, -LT_HIDE_DELAY)
 }
@@ -404,12 +425,18 @@ LT_Hide() {
 }
 
 ; LT_Follow — timer callback (every LT_FOLLOW_TICK ms while visible) that keeps the badge
-; glued to the caret, or to the mouse pointer when there is no caret.
+; glued to the caret, or to the mouse pointer when there is no caret — unless the badge
+; was shown by the window-switch trigger (LT_strictCaret), which never falls back to the
+; mouse: the badge simply keeps its last position until the hide timer fires.
 LT_Follow() {
+    global LT_visible, LT_strictCaret
     if !LT_visible
         return
-    if !LT_GetCaret(&x, &y, &w, &h)
+    if !LT_GetCaret(&x, &y, &w, &h) {
+        if LT_strictCaret
+            return
         LT_MouseAnchor(&x, &y, &w, &h)
+    }
     LT_Reposition(x, y, w, h)
 }
 
