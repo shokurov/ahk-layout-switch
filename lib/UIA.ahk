@@ -1,4 +1,4 @@
-﻿/*
+/*
     Introduction & credits
     This library implements Microsoft's UI Automation framework.
     Microsoft's official documentation:: https://docs.microsoft.com/en-us/windows/win32/winauto/entry-uiauto-win32
@@ -1853,7 +1853,10 @@ class IUIAutomationBase {
             throw ValueError('Invalid IUnknown interface pointer', -2, this.__Class)
         this.DefineProp("ptr", {Value:ptr})
     }
-    __Delete() => this.Release()
+    __Delete() {
+        if HasProp(this, "ptr") && this.ptr
+            this.Release()
+    }
     __Item => (ObjAddRef(this.ptr), ComValue(0xd, this.ptr))
     AddRef() => ObjAddRef(this.ptr)
     Release() => this.ptr ? ObjRelease(this.ptr) : 0
