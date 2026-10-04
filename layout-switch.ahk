@@ -96,7 +96,15 @@ class Layout {
         if !hwnd
             return false
         target := DllCall("GetAncestor", "Ptr", hwnd, "UInt", Layout.GA_ROOTOWNER, "Ptr")
-        PostMessage(Layout.WM_INPUTLANGCHANGEREQUEST, 0, hkl,, "ahk_id " (target ? target : hwnd))
+        ; The root owner can be a hidden window (Word's dialogs are owned by an invisible
+        ; OpusApp); fall back to the active window itself then.
+        if !(target && DllCall("IsWindowVisible", "Ptr", target))
+            target := hwnd
+        ; A pure HWND, not "ahk_id …": the latter honours DetectHiddenWindows and throws
+        ; "Target window not found". The window may also be gone by now — not worth a dialog.
+        try PostMessage(Layout.WM_INPUTLANGCHANGEREQUEST, 0, hkl,, target)
+        catch
+            return false
         return true
     }
 

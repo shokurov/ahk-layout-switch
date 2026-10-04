@@ -25,7 +25,7 @@ that gap.
 
 - Windows 10 or 11.
 - [AutoHotkey](https://www.autohotkey.com/) v2.0.
-- `layout-tooltip.ahk` needs `lib/UIA.ahk` next to it (bundled, see Credits).
+- `layout-tooltip.ahk` needs `Lib/UIA.ahk` next to it (bundled, see Credits).
 
 ## Install
 
@@ -135,7 +135,7 @@ back to a normal window and simply can't overlay those shell surfaces.
 
 ## Credits
 
-- `lib/UIA.ahk` is [UIA-v2](https://github.com/Descolada/UIA-v2) by Descolada, MIT
+- `Lib/UIA.ahk` is [UIA-v2](https://github.com/Descolada/UIA-v2) by Descolada, MIT
   licence.
 
 ## License

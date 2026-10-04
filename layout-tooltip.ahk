@@ -16,9 +16,9 @@
 ; over Win+S / Start menu — see LT_Init.
 ;
 ; Standalone: run this file directly. As a module: #Include it from your main script
-; (lib\UIA.ahk is included once; AHK v2 ignores repeated #Include of the same file).
+; (Lib\UIA.ahk is included once; AHK v2 ignores repeated #Include of the same file).
 
-#Include lib\UIA.ahk
+#Include Lib\UIA.ahk
 
 ; ============================================================================ Configuration
 
