@@ -117,6 +117,7 @@ global LT_lastHkl := 0
 global LT_visible := false
 global LT_pendingHkl := 0, LT_pendingCaret := false  ; latest LT_Trigger state, shown by the shared timer
 global LT_strictCaret := false                       ; current badge may not fall back to the mouse
+global LT_uiaCaret := false                          ; current badge is anchored to a caret only UIA can see
 global LT_probeHwnd := 0     ; active hwnd at the last caret probe
 global LT_lastCaret := true  ; latch: caret present at last probe (true = first snapshot of a window never counts as an entry)
 
@@ -355,6 +356,13 @@ LT_Poll() {
 ; the accessibility query itself can make Chromium/Electron open their menu bar (see
 ; LT_Show's modifier wait).
 ;
+; The probe never asks UI Automation: at four calls a second, every window without a
+; Win32 or MSAA caret (Explorer, the desktop, most dialogs) kept hitting
+; GetFocusedElement, and a rare double free inside uiautomationcore's worker thread then
+; took the whole process down with heap corruption. So entering a field is not detected
+; where only UIA sees the caret (WinUI/UWP, Windows Terminal, Win+S); a layout change
+; there still shows the badge.
+;
 ; Sets:    LT_probeHwnd, LT_lastCaret.
 LT_Probe() {
     global LT_probeHwnd, LT_lastCaret
@@ -372,7 +380,7 @@ LT_Probe() {
         LT_lastCaret := true
     }
     t := A_TickCount
-    found := LT_GetCaret(&x, &y, &w, &h)
+    found := LT_GetCaret(&x, &y, &w, &h, false)
     if (A_TickCount - t > LT_MAX_LOOKUP)
         return                           ; slow probe — skip, keep latch state
     if (found && !LT_lastCaret && LT_SHOW_ON_FIELD_ENTRY)
@@ -421,9 +429,9 @@ LT_ShowPending() {
 ; Params:  hkl           layout to display; 0 = current layout of the active window
 ;          requireCaret  if true, show nothing when no caret is found (used by the
 ;                        window-switch trigger so a caret-less window stays blank)
-; Sets:    LT_visible, LT_lastHkl, LT_strictCaret.
+; Sets:    LT_visible, LT_lastHkl, LT_strictCaret, LT_uiaCaret.
 LT_Show(hkl := 0, requireCaret := false) {
-    global LT_visible, LT_lastHkl, LT_strictCaret
+    global LT_visible, LT_lastHkl, LT_strictCaret, LT_uiaCaret
     static waited := 0
     if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")) {
         if (waited < LT_MODIFIER_WAIT) {
@@ -462,6 +470,7 @@ LT_Show(hkl := 0, requireCaret := false) {
     DllCall("ShowWindow", "Ptr", LT_hwnd, "Int", 8)  ; SW_SHOWNA
     LT_visible := true
     LT_strictCaret := requireCaret
+    LT_uiaCaret := (found = 3)
     SetTimer(LT_Follow, LT_FOLLOW_TICK)
     SetTimer(LT_Hide, -LT_HIDE_DELAY)
 }
@@ -478,11 +487,14 @@ LT_Hide() {
 ; glued to the caret, or to the mouse pointer when there is no caret — unless the badge
 ; was shown by the window-switch trigger (LT_strictCaret), which never falls back to the
 ; mouse: the badge simply keeps its last position until the hide timer fires.
+;
+; Like LT_Probe, it never asks UI Automation (it runs every 30 ms); a badge anchored to a
+; caret only UIA sees (LT_uiaCaret) just stays where it was shown.
 LT_Follow() {
-    global LT_visible, LT_strictCaret
-    if !LT_visible
+    global LT_visible, LT_strictCaret, LT_uiaCaret
+    if !LT_visible || LT_uiaCaret
         return
-    if !LT_GetCaret(&x, &y, &w, &h) {
+    if !LT_GetCaret(&x, &y, &w, &h, false) {
         if LT_strictCaret
             return
         LT_MouseAnchor(&x, &y, &w, &h)
@@ -578,16 +590,18 @@ LT_IsoCode(langId) {
 ; Terminal, Win+S). Each source is skipped silently when it doesn't apply.
 ;
 ; Params:  &x, &y, &w, &h  receive the caret rect in physical screen pixels
-; Returns: true if any source found a caret, false otherwise (outputs are then 0).
-LT_GetCaret(&x, &y, &w, &h) {
+;          allowUia      false skips UI Automation — for the timers, see LT_Probe
+; Returns: the source that found the caret (1 GetGUIThreadInfo, 2 MSAA, 3 UIA), or 0
+;          when none did (outputs are then 0).
+LT_GetCaret(&x, &y, &w, &h, allowUia := true) {
     x := y := w := h := 0
     if LT_CaretFromGuiThreadInfo(&x, &y, &w, &h)
-        return true
+        return 1
     if LT_CaretFromMsaa(&x, &y, &w, &h)
-        return true
-    if LT_CaretFromUia(&x, &y, &w, &h)
-        return true
-    return false
+        return 2
+    if allowUia && LT_CaretFromUia(&x, &y, &w, &h)
+        return 3
+    return 0
 }
 
 ; LT_GuiThreadInfo — GUITHREADINFO of the foreground thread (GetGUIThreadInfo(0)).

@@ -87,7 +87,11 @@ field" the badge appears, so you always see the active layout before you start t
 Turn that off with `LT_SHOW_ON_FIELD_ENTRY := false`. The caret is probed every
 `LT_FIELD_PROBE_TICK` (250 ms); a slow probe (freshly started app still building its
 accessibility tree) is skipped. The first snapshot of a window never counts as an entry,
-so switching directly into a field shows the badge once, not twice.
+so switching directly into a field shows the badge once, not twice. The probe only looks
+for Win32 and MSAA carets: polling UI Automation several times a second eventually
+crashed the process inside `uiautomationcore.dll`, so entering a field is not detected in
+WinUI/UWP apps, Windows Terminal and the Win+S box (a layout change there still shows the
+badge).
 
 ### `layout-switch.ahk`
 
