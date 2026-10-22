@@ -6,7 +6,7 @@ the two.
 
 | Script | What it does |
 |---|---|
-| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes — and whenever you enter a text input field, whether by switching to a window whose focus lands on one or by clicking/tabbing into one afterwards. The Windows counterpart of macOS' *Show input source indicator near the caret*. |
+| `layout-tooltip.ahk` | Shows the layout code (`EN`, `DE`, …) in a small badge right under the text caret every time the keyboard layout changes, whenever you enter a text input field (by switching to a window whose focus lands on one or by clicking/tabbing into one afterwards), and while you hold Ctrl or Alt. The Windows counterpart of macOS' *Show input source indicator near the caret*. |
 | `layout-switch.ahk` | Cycles through *your* list of languages with one hotkey (Ctrl+Space by default, like macOS) and jumps to a language directly with another. Ignores layouts you don't use. |
 
 Both are AutoHotkey v2 and independent: run one or both.
@@ -92,6 +92,15 @@ for Win32 and MSAA carets: polling UI Automation several times a second eventual
 crashed the process inside `uiautomationcore.dll`, so entering a field is not detected in
 WinUI/UWP apps, Windows Terminal and the Win+S box (a layout change there still shows the
 badge).
+
+Pressing Ctrl or Alt shows the badge too: it stays while the key is held and for at least
+`LT_MODIFIER_MIN_SHOW` (500 ms) after a short tap, so you can check the layout without
+typing anything. The keys are listed in `LT_SHOW_ON_KEYS` (`["LCtrl", "RCtrl", "LAlt",
+"RAlt"]`); drop the ones you don't want, or set `[]` to turn it off. On layouts with AltGr
+(German, French, …) the right Alt is AltGr, so typing `@` or `{` shows the badge as well;
+remove `"RAlt"` if that bothers you. With Alt the badge appears on Alt-down, before the
+other key of the combination, and doesn't follow the caret until Alt is released, which
+keeps Chromium and Electron apps from opening their menu bar.
 
 ### `layout-switch.ahk`
 
