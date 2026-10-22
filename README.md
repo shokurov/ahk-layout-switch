@@ -100,7 +100,9 @@ typing anything. The keys are listed in `LT_SHOW_ON_KEYS` (`["LCtrl", "RCtrl", "
 (German, French, …) the right Alt is AltGr, so typing `@` or `{` shows the badge as well;
 remove `"RAlt"` if that bothers you. With Alt the badge appears on Alt-down, before the
 other key of the combination, and doesn't follow the caret until Alt is released, which
-keeps Chromium and Electron apps from opening their menu bar.
+keeps Chromium and Electron apps from opening their menu bar. If the layout changes while
+the badge is on screen (Ctrl+Space, Alt+Space, Alt+Shift), the label switches in place at
+once, without waiting for the modifiers to be released.
 
 ### `layout-switch.ahk`
 

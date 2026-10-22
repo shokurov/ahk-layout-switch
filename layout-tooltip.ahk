@@ -223,6 +223,27 @@ LT_KeyHeld() {
     return false
 }
 
+; LT_AltWinHeld — true while Alt or Win is physically held. No caret lookup and no badge
+; appearing then: Chromium/Electron would open their menu bar on Alt-up (see LT_Show).
+LT_AltWinHeld() {
+    return GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")
+}
+
+; LT_Style — badge label and background colour for a layout, from LT_LANG (unlisted
+; languages: ISO code on LT_OTHER_SHADE).
+;
+; Params:  hkl  keyboard layout handle (language ID in the low word)
+; Returns: [label, "RRGGBB"]
+LT_Style(hkl) {
+    langId := hkl & 0xFFFF
+    info := LT_LANG.Has(langId) ? LT_LANG[langId] : [LT_IsoCode(langId), LT_OTHER_SHADE]
+    pal := LT_AccentPalette()
+    color := pal.Has(info[2]) ? pal[info[2]]
+           : (info[2] ~= "^[0-9A-Fa-f]{6}$") ? info[2]      ; literal RRGGBB
+           : LT_FALLBACK["accent"]
+    return [info[1], color]
+}
+
 ; LT_Render — paint the badge bitmap and push it to the layered window.
 ;
 ; Draws `text` (Segoe UI bold 10pt, colour from LT_TextColor) centred on a solid
@@ -427,13 +448,7 @@ LT_Poll() {
 LT_Probe() {
     global LT_probeHwnd, LT_lastCaret
     hwnd := WinExist("A")
-    if !hwnd
-        return
-    ; Don't run an accessibility query while Alt or Win is physically held: Chromium and
-    ; Electron apps treat such a query during an Alt press as Alt pressed alone and open
-    ; their menu bar (the same reason LT_Show waits for the modifiers). A skipped probe
-    ; leaves the latch untouched — it is neither a transition nor proof the caret is gone.
-    if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P"))
+    if !hwnd || LT_AltWinHeld()
         return
     if (hwnd != LT_probeHwnd) {          ; new window — snapshot does not count as entry
         LT_probeHwnd := hwnd
@@ -455,11 +470,18 @@ LT_Probe() {
 ; timer (LT_ShowPending) with the newest state, so rapid triggers — Alt+Tab through
 ; several windows — resolve to the last one instead of stacking concurrent shows.
 ;
+; A layout change while the badge is already on screen skips all of that: LT_Relabel
+; switches the label in place at once, even while Alt is held.
+;
 ; Params:  hkl           layout to display; 0 = read the active window's layout at show time
 ;          requireCaret  if true, show nothing when no caret is found (used by the
 ;                        window-switch trigger so a caret-less window stays blank)
 LT_Trigger(hkl := 0, requireCaret := false) {
     global LT_pendingHkl, LT_pendingCaret
+    if (hkl && LT_visible) {
+        LT_Relabel(hkl)
+        return
+    }
     LT_pendingHkl := hkl, LT_pendingCaret := requireCaret
     SetTimer(LT_ShowPending, -LT_SHOW_DELAY)
 }
@@ -470,6 +492,25 @@ LT_Trigger(hkl := 0, requireCaret := false) {
 LT_ShowPending() {
     global LT_pendingHkl, LT_pendingCaret
     LT_Show(LT_pendingHkl, LT_pendingCaret)
+}
+
+; LT_Relabel — switch the visible badge to another layout in place.
+;
+; Repaints the label at the badge's current position and restarts the hide timer. There
+; is no caret lookup and no window appearing, so unlike LT_Show it is safe while Alt is
+; held: the badge shown on Alt-down flips to the new layout right after Alt+Space or
+; Alt+Shift instead of waiting for Alt-up.
+;
+; Params:  hkl  layout to display
+; Sets:    LT_lastHkl; LT_pendingHkl, so a show still waiting for Alt-up can't bring
+;          back the old layout.
+LT_Relabel(hkl) {
+    global LT_lastHkl, LT_pendingHkl
+    LT_lastHkl := hkl, LT_pendingHkl := hkl
+    style := LT_Style(hkl)
+    LT_GetPos(&x, &y, &_, &_)
+    LT_Render(style[1], style[2], x, y)
+    SetTimer(LT_Hide, -LT_HIDE_DELAY)
 }
 
 ; ---------------------------------------------------------------- show / hide
@@ -495,7 +536,7 @@ LT_ShowPending() {
 LT_Show(hkl := 0, requireCaret := false, now := false) {
     global LT_visible, LT_lastHkl, LT_strictCaret, LT_uiaCaret
     static waited := 0
-    if (!now && (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P"))) {
+    if (!now && LT_AltWinHeld()) {
         if (waited < LT_MODIFIER_WAIT) {
             waited += 20
             SetTimer(LT_ShowPending, -20)
@@ -508,12 +549,7 @@ LT_Show(hkl := 0, requireCaret := false, now := false) {
     if requireCaret && !hkl
         return      ; switch-trigger: no readable layout — nothing to show
     LT_lastHkl := hkl
-    langId := hkl & 0xFFFF
-    info := LT_LANG.Has(langId) ? LT_LANG[langId] : [LT_IsoCode(langId), LT_OTHER_SHADE]
-    pal := LT_AccentPalette()
-    color := pal.Has(info[2]) ? pal[info[2]]
-           : (info[2] ~= "^[0-9A-Fa-f]{6}$") ? info[2]      ; literal RRGGBB
-           : LT_FALLBACK["accent"]
+    style := LT_Style(hkl)
     ; A slow first lookup (accessibility tree being built in the target process) means it's
     ; too late to be useful — show nothing. No caret at all (Warp, games, GPU-rendered UIs…)
     ; falls back to the mouse pointer — unless the show was requested for a window switch,
@@ -527,7 +563,7 @@ LT_Show(hkl := 0, requireCaret := false, now := false) {
             return
         LT_MouseAnchor(&x, &y, &w, &h)
     }
-    LT_Render(info[1], color, x, y + h + LT_CARET_GAP)
+    LT_Render(style[1], style[2], x, y + h + LT_CARET_GAP)
     LT_Reposition(x, y, w, h)
     DllCall("ShowWindow", "Ptr", LT_hwnd, "Int", 8)  ; SW_SHOWNA
     LT_visible := true
@@ -564,9 +600,7 @@ LT_Hide() {
 ; menu bar on Alt-up (see LT_Show).
 LT_Follow() {
     global LT_visible, LT_strictCaret, LT_uiaCaret
-    if !LT_visible || LT_uiaCaret
-        return
-    if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P"))
+    if !LT_visible || LT_uiaCaret || LT_AltWinHeld()
         return
     if !LT_GetCaret(&x, &y, &w, &h, false) {
         if LT_strictCaret
