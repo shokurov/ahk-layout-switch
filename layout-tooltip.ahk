@@ -3,8 +3,8 @@
 ; right under the text caret whenever the layout of the active window changes
 ; (Ctrl+Space, Win+Space, Alt+Shift, mouse click on the tray indicator — any source),
 ; when switching to another window whose focus lands on a text input field
-; (LT_SHOW_ON_SWITCH), and when entering any text input field afterwards
-; (LT_SHOW_ON_FIELD_ENTRY).
+; (LT_SHOW_ON_SWITCH), when entering any text input field afterwards
+; (LT_SHOW_ON_FIELD_ENTRY), and while Ctrl or Alt is held (LT_SHOW_ON_KEYS).
 ;
 ; Caret position is resolved through regular, documented APIs only:
 ;   1. GetGUIThreadInfo (classic Win32 caret: Notepad, Explorer, Office, Sublime, WinForms…)
@@ -48,6 +48,10 @@ global LT_MODIFIER_WAIT  := 2000  ; ms; how long to wait for Alt/Win to be relea
 global LT_SHOW_ON_SWITCH  := true   ; show the badge when switching to a window with an input field
 global LT_SHOW_ON_FIELD_ENTRY := true   ; show the badge when entering a text input field
 global LT_FIELD_PROBE_TICK    := 250    ; ms between caret probes
+; Show the badge while one of these keys is held, and for at least LT_MODIFIER_MIN_SHOW ms
+; after it was pressed. AutoHotkey key names; [] turns the trigger off.
+global LT_SHOW_ON_KEYS      := ["LCtrl", "RCtrl", "LAlt", "RAlt"]
+global LT_MODIFIER_MIN_SHOW := 500      ; ms the badge stays after a short tap
 
 ; ============================================================================ End of configuration
 
@@ -120,6 +124,9 @@ global LT_strictCaret := false                       ; current badge may not fal
 global LT_uiaCaret := false                          ; current badge is anchored to a caret only UIA can see
 global LT_probeHwnd := 0     ; active hwnd at the last caret probe
 global LT_lastCaret := true  ; latch: caret present at last probe (true = first snapshot of a window never counts as an entry)
+global LT_keyHook := 0       ; InputHook watching LT_SHOW_ON_KEYS
+global LT_keysDown := Map()  ; vk -> true for LT_SHOW_ON_KEYS currently down (filters auto-repeat)
+global LT_keyUntil := 0      ; A_TickCount before which the badge must not hide (LT_MODIFIER_MIN_SHOW)
 
 ; AutoHotkey is system-DPI-aware: on a monitor with a different scale factor every
 ; coordinate it sees is virtualised, and the badge drifts away from the caret in
@@ -161,6 +168,80 @@ LT_Init() {
     SetTimer(LT_Poll, LT_POLL_TICK)
     if LT_SHOW_ON_FIELD_ENTRY
         SetTimer(LT_Probe, LT_FIELD_PROBE_TICK)
+    if LT_SHOW_ON_KEYS.Length
+        LT_StartKeyHook()
+}
+
+; LT_StartKeyHook — watch LT_SHOW_ON_KEYS for the hold-to-show trigger.
+;
+; An InputHook rather than "~LAlt::" hotkeys: hotkeys on lone modifiers take part in
+; AutoHotkey's menu masking (#MenuMaskKey) and prefix-key handling, which could change what
+; the application sees. The hook only observes (V), collects no text (L0) and ignores
+; AutoHotkey's own Send (I).
+;
+; Sets:    LT_keyHook.
+LT_StartKeyHook() {
+    global LT_keyHook
+    keys := ""
+    for k in LT_SHOW_ON_KEYS
+        keys .= "{" k "}"
+    LT_keyHook := InputHook("L0 I V")
+    LT_keyHook.KeyOpt(keys, "N")
+    LT_keyHook.OnKeyDown := LT_KeyDown
+    LT_keyHook.OnKeyUp := LT_KeyUp
+    LT_keyHook.Start()
+}
+
+; LT_KeyDown — InputHook callback: a watched key went down. Shows the badge at once (no
+; LT_SHOW_DELAY, no wait for Alt release — see LT_Show) and keeps it at least
+; LT_MODIFIER_MIN_SHOW ms; LT_Hide keeps it while the key is held.
+;
+; Auto-repeat of a held key and the fake LCtrl that AltGr generates (scan code 0x21D) are
+; ignored.
+;
+; Sets:    LT_keysDown, LT_keyUntil.
+LT_KeyDown(ih, vk, sc) {
+    global LT_keyUntil
+    if (sc = 0x21D || LT_keysDown.Has(vk))
+        return
+    LT_keysDown[vk] := true
+    LT_keyUntil := A_TickCount + LT_MODIFIER_MIN_SHOW
+    LT_Show(0, false, true)
+}
+
+; LT_KeyUp — InputHook callback: a watched key went up; re-arms LT_KeyDown for it.
+LT_KeyUp(ih, vk, sc) {
+    if LT_keysDown.Has(vk)
+        LT_keysDown.Delete(vk)
+}
+
+; LT_KeyHeld — true while any of LT_SHOW_ON_KEYS is physically down.
+LT_KeyHeld() {
+    for k in LT_SHOW_ON_KEYS
+        if GetKeyState(k, "P")
+            return true
+    return false
+}
+
+; LT_AltWinHeld — true while Alt or Win is physically held. No caret lookup and no badge
+; appearing then: Chromium/Electron would open their menu bar on Alt-up (see LT_Show).
+LT_AltWinHeld() {
+    return GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")
+}
+
+; LT_Style — badge label and background colour for a layout, from LT_LANG (unlisted
+; languages: ISO code on LT_OTHER_SHADE).
+;
+; Params:  hkl  keyboard layout handle (language ID in the low word)
+; Returns: [label, "RRGGBB"]
+LT_Style(hkl) {
+    langId := hkl & 0xFFFF
+    info := LT_LANG.Has(langId) ? LT_LANG[langId] : [LT_IsoCode(langId), LT_OTHER_SHADE]
+    pal := LT_AccentPalette()
+    color := pal.Has(info[2]) ? pal[info[2]]
+           : (info[2] ~= "^[0-9A-Fa-f]{6}$") ? info[2]      ; literal RRGGBB
+           : LT_FALLBACK["accent"]
+    return [info[1], color]
 }
 
 ; LT_Render — paint the badge bitmap and push it to the layered window.
@@ -367,13 +448,7 @@ LT_Poll() {
 LT_Probe() {
     global LT_probeHwnd, LT_lastCaret
     hwnd := WinExist("A")
-    if !hwnd
-        return
-    ; Don't run an accessibility query while Alt or Win is physically held: Chromium and
-    ; Electron apps treat such a query during an Alt press as Alt pressed alone and open
-    ; their menu bar (the same reason LT_Show waits for the modifiers). A skipped probe
-    ; leaves the latch untouched — it is neither a transition nor proof the caret is gone.
-    if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P"))
+    if !hwnd || LT_AltWinHeld()
         return
     if (hwnd != LT_probeHwnd) {          ; new window — snapshot does not count as entry
         LT_probeHwnd := hwnd
@@ -395,11 +470,18 @@ LT_Probe() {
 ; timer (LT_ShowPending) with the newest state, so rapid triggers — Alt+Tab through
 ; several windows — resolve to the last one instead of stacking concurrent shows.
 ;
+; A layout change while the badge is already on screen skips all of that: LT_Relabel
+; switches the label in place at once, even while Alt is held.
+;
 ; Params:  hkl           layout to display; 0 = read the active window's layout at show time
 ;          requireCaret  if true, show nothing when no caret is found (used by the
 ;                        window-switch trigger so a caret-less window stays blank)
 LT_Trigger(hkl := 0, requireCaret := false) {
     global LT_pendingHkl, LT_pendingCaret
+    if (hkl && LT_visible) {
+        LT_Relabel(hkl)
+        return
+    }
     LT_pendingHkl := hkl, LT_pendingCaret := requireCaret
     SetTimer(LT_ShowPending, -LT_SHOW_DELAY)
 }
@@ -410,6 +492,25 @@ LT_Trigger(hkl := 0, requireCaret := false) {
 LT_ShowPending() {
     global LT_pendingHkl, LT_pendingCaret
     LT_Show(LT_pendingHkl, LT_pendingCaret)
+}
+
+; LT_Relabel — switch the visible badge to another layout in place.
+;
+; Repaints the label at the badge's current position and restarts the hide timer. There
+; is no caret lookup and no window appearing, so unlike LT_Show it is safe while Alt is
+; held: the badge shown on Alt-down flips to the new layout right after Alt+Space or
+; Alt+Shift instead of waiting for Alt-up.
+;
+; Params:  hkl  layout to display
+; Sets:    LT_lastHkl; LT_pendingHkl, so a show still waiting for Alt-up can't bring
+;          back the old layout.
+LT_Relabel(hkl) {
+    global LT_lastHkl, LT_pendingHkl
+    LT_lastHkl := hkl, LT_pendingHkl := hkl
+    style := LT_Style(hkl)
+    LT_GetPos(&x, &y, &_, &_)
+    LT_Render(style[1], style[2], x, y)
+    SetTimer(LT_Hide, -LT_HIDE_DELAY)
 }
 
 ; ---------------------------------------------------------------- show / hide
@@ -424,16 +525,18 @@ LT_ShowPending() {
 ; Alt+Space / Win+Space): Chromium and Electron apps treat a window appearing — or an
 ; accessibility query arriving — during an Alt press as if Alt had been pressed alone,
 ; and open the menu bar when it is released. The show is re-tried every 20 ms until the
-; modifiers are up, for at most LT_MODIFIER_WAIT ms.
+; modifiers are up, for at most LT_MODIFIER_WAIT ms. The hold-to-show trigger skips the
+; wait: there the badge appears on Alt-down itself, before any other key of a combination.
 ;
 ; Params:  hkl           layout to display; 0 = current layout of the active window
 ;          requireCaret  if true, show nothing when no caret is found (used by the
 ;                        window-switch trigger so a caret-less window stays blank)
+;          now           if true, don't wait for Alt/Win release (LT_KeyDown)
 ; Sets:    LT_visible, LT_lastHkl, LT_strictCaret, LT_uiaCaret.
-LT_Show(hkl := 0, requireCaret := false) {
+LT_Show(hkl := 0, requireCaret := false, now := false) {
     global LT_visible, LT_lastHkl, LT_strictCaret, LT_uiaCaret
     static waited := 0
-    if (GetKeyState("Alt", "P") || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")) {
+    if (!now && LT_AltWinHeld()) {
         if (waited < LT_MODIFIER_WAIT) {
             waited += 20
             SetTimer(LT_ShowPending, -20)
@@ -446,12 +549,7 @@ LT_Show(hkl := 0, requireCaret := false) {
     if requireCaret && !hkl
         return      ; switch-trigger: no readable layout — nothing to show
     LT_lastHkl := hkl
-    langId := hkl & 0xFFFF
-    info := LT_LANG.Has(langId) ? LT_LANG[langId] : [LT_IsoCode(langId), LT_OTHER_SHADE]
-    pal := LT_AccentPalette()
-    color := pal.Has(info[2]) ? pal[info[2]]
-           : (info[2] ~= "^[0-9A-Fa-f]{6}$") ? info[2]      ; literal RRGGBB
-           : LT_FALLBACK["accent"]
+    style := LT_Style(hkl)
     ; A slow first lookup (accessibility tree being built in the target process) means it's
     ; too late to be useful — show nothing. No caret at all (Warp, games, GPU-rendered UIs…)
     ; falls back to the mouse pointer — unless the show was requested for a window switch,
@@ -465,7 +563,7 @@ LT_Show(hkl := 0, requireCaret := false) {
             return
         LT_MouseAnchor(&x, &y, &w, &h)
     }
-    LT_Render(info[1], color, x, y + h + LT_CARET_GAP)
+    LT_Render(style[1], style[2], x, y + h + LT_CARET_GAP)
     LT_Reposition(x, y, w, h)
     DllCall("ShowWindow", "Ptr", LT_hwnd, "Int", 8)  ; SW_SHOWNA
     LT_visible := true
@@ -476,8 +574,14 @@ LT_Show(hkl := 0, requireCaret := false) {
 }
 
 ; LT_Hide — hide the badge and stop following the caret. Timer callback (LT_HIDE_DELAY).
+; While a LT_SHOW_ON_KEYS key is held, or less than LT_MODIFIER_MIN_SHOW ms have passed
+; since one was pressed, it re-checks every LT_FOLLOW_TICK ms instead of hiding.
 LT_Hide() {
     global LT_visible
+    if (LT_keyUntil > A_TickCount || LT_KeyHeld()) {
+        SetTimer(LT_Hide, -LT_FOLLOW_TICK)
+        return
+    }
     SetTimer(LT_Follow, 0)
     DllCall("ShowWindow", "Ptr", LT_hwnd, "Int", 0)  ; SW_HIDE
     LT_visible := false
@@ -490,9 +594,13 @@ LT_Hide() {
 ;
 ; Like LT_Probe, it never asks UI Automation (it runs every 30 ms); a badge anchored to a
 ; caret only UIA sees (LT_uiaCaret) just stays where it was shown.
+;
+; While Alt or Win is physically held the badge keeps its position too: an accessibility
+; query after the other key of an Alt combination would make Chromium/Electron open their
+; menu bar on Alt-up (see LT_Show).
 LT_Follow() {
     global LT_visible, LT_strictCaret, LT_uiaCaret
-    if !LT_visible || LT_uiaCaret
+    if !LT_visible || LT_uiaCaret || LT_AltWinHeld()
         return
     if !LT_GetCaret(&x, &y, &w, &h, false) {
         if LT_strictCaret
