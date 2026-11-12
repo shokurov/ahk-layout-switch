@@ -42,6 +42,7 @@ To use them inside your own v2 script instead of running them standalone:
 #Include path\to\layout-switch.ahk       ; only defines the Layout class
 ^Space::Layout.Cycle(["EN", "DE"])
 ^+2::Layout.Set("DE")
+Layout.BlockLoneAlt()                    ; optional: a lone Alt tap opens no menu
 ```
 
 ## Configure
@@ -110,12 +111,19 @@ once, without waiting for the modifiers to be released.
 global Languages     := ["EN", "DE"]                   ; cycle order, ISO 639 codes
 global CycleHotkey   := "^Space"                       ; Ctrl+Space, macOS style
 global DirectHotkeys := Map("^+1", "EN", "^+2", "DE")  ; Ctrl+Shift+1 / +2, or Map() to disable
+global BlockLoneAlt  := false                          ; true: a lone Alt tap opens no menu
 ```
 
 Hotkey syntax is AutoHotkey's: `^` Ctrl, `!` Alt, `+` Shift, `#` Win. `CapsLock` is a
 popular alternative for the cycle hotkey. A language must be installed in Windows to be
 selectable. Switching applies to the active window only, exactly like Windows' own
 switching.
+
+`BlockLoneAlt := true` keeps a lone Alt tap from opening the application menu (Claude
+Desktop, VS Code and other Electron apps, classic menu bars). Turn it on if Alt is your
+layout key (`CycleHotkey := "!Space"`) or if you tap Alt to see the badge: an accidental
+menu then steals the focus from the text you are typing. Alt combinations, Alt+Tab and
+AltGr are not affected. As a module, call `Layout.BlockLoneAlt()` once.
 
 ## How the badge finds the caret
 

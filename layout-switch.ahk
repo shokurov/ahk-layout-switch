@@ -25,12 +25,21 @@ global CycleHotkey := "^Space"
 ; Example below: Ctrl+Shift+1 -> EN, Ctrl+Shift+2 -> DE.
 global DirectHotkeys := Map("^+1", "EN", "^+2", "DE")
 
+; Keep a lone Alt tap (pressed and released on its own) from opening the application menu,
+; as it does in Claude Desktop, VS Code and other Electron apps or in classic menu bars.
+; Useful when Alt is your layout key (CycleHotkey "!Space") or when layout-tooltip.ahk shows
+; the badge on Alt: you tap Alt often then. Alt combinations, Alt+Tab and AltGr keep
+; working. As a module, call Layout.BlockLoneAlt() instead.
+global BlockLoneAlt := false
+
 ; ============================================================================ End of configuration
 
 if (A_ScriptName = "layout-switch.ahk") {   ; standalone: register the configured hotkeys
     Hotkey(CycleHotkey, (*) => Layout.Cycle(Languages))
     for key, lang in DirectHotkeys
         Hotkey(key, ((l, *) => Layout.Set(l)).Bind(lang))
+    if BlockLoneAlt
+        Layout.BlockLoneAlt()
 }
 
 ; Layout — installed keyboard layouts and per-window switching. All methods are static.
@@ -123,5 +132,20 @@ class Layout {
         ; the menu bar"; a harmless F15 in between prevents that.
         if InStr(A_ThisHotkey, "!")
             Send("{Blind}{F15}")
+    }
+
+    ; Layout.BlockLoneAlt — stop a lone Alt tap from opening the active window's menu.
+    ;
+    ; An application opens its menu on Alt-up only if no other key was pressed while Alt
+    ; was down. On Alt-down an unassigned key (vkE8) is sent, the technique the AutoHotkey
+    ; docs give for the Win key (see A_MenuMaskKey), so every Alt press counts as a
+    ; combination. Alt itself passes through untouched (~). The hotkeys don't fire with
+    ; other modifiers held (no *), so AltGr (Ctrl+RAlt) and Shift+Alt or Ctrl+Alt pressed
+    ; in that order send nothing: a mask after Shift-down cancels Windows' Shift+Alt layout
+    ; switch, while a mask before Shift (Alt+Shift) doesn't. The thread waits for the
+    ; release, so auto-repeat of a held Alt doesn't send the mask again.
+    static BlockLoneAlt() {
+        for key in ["~LAlt", "~RAlt"]
+            Hotkey(key, (hk) => (Send("{Blind}{vkE8}"), KeyWait(SubStr(hk, 2))))
     }
 }
